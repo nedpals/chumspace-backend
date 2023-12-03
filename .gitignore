@@ -1,0 +1,4 @@
+pb_data
+*.json
+pocketbase
+.DS_Store
