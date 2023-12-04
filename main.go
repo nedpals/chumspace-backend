@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
@@ -63,11 +64,18 @@ func main() {
 
 	// serves static files from the provided public dir (if exists)
 	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+		// notification scheduler
+		notifScheduler, monitorNotifications := startSchedulingNotifications()
+
+		// firebase
 		firebaseApp := initializeFirebase()
 		messagingClient, err := firebaseApp.Messaging(context.Background())
 		if err != nil {
 			return err
 		}
+
+		// set the messaging client of the notification scheduler
+		notifScheduler.MessagingClient = messagingClient
 
 		// get the livekit api key and secret first
 		lkApiKey, lkApiKeyExists := os.LookupEnv("LIVEKIT_API_KEY")
@@ -85,6 +93,39 @@ func main() {
 				"Unable to fulfill your request at this time due to an internal error.",
 				nil)
 		}
+
+		e.Router.Add("POST", "/api/test_fcm", func(c echo.Context) error {
+			// get the token from query params
+			token := c.QueryParam("token")
+			if len(token) == 0 {
+				return apis.NewBadRequestError("token is required", nil)
+			}
+
+			// construct the message
+			ttl := time.Duration(10) * time.Second
+
+			notifScheduler.AddNotification(&ScheduledNotification{
+				Message: &messaging.Message{
+					Data: map[string]string{
+						"type": "test_fcm",
+					},
+					Notification: &messaging.Notification{
+						Title: "Test FCM",
+						Body:  "This is a test notification",
+						// ImageURL: fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar")),
+					},
+					Android: &messaging.AndroidConfig{
+						TTL: &ttl,
+					},
+					Token: token,
+				},
+				ScheduledTime: time.Now().Add(5 * time.Second),
+			})
+
+			return c.JSON(http.StatusOK, map[string]string{
+				"message": "success",
+			})
+		}, apis.RequireRecordAuth())
 
 		e.Router.Add("POST", "/api/join_call", func(c echo.Context) error {
 			// get the call type
@@ -189,28 +230,28 @@ func main() {
 
 				if len(tokens) != 0 {
 					// construct the message
-					message := &messaging.MulticastMessage{
-						Data: map[string]string{
-							"type":      "incoming_call",
-							"call_type": callType,
-							"invitee":   string(inviteeJson),
-							"chat_id":   chat.Id,
+					ttl := time.Duration(10) * time.Second
+					notifScheduler.AddNotification(&ScheduledNotification{
+						MulticastMessage: &messaging.MulticastMessage{
+							Data: map[string]string{
+								"type":      "incoming_call",
+								"call_type": callType,
+								"invitee":   string(inviteeJson),
+								"chat_id":   chat.Id,
+							},
+							Notification: &messaging.Notification{
+								Title:    "Incoming Call",
+								Body:     participantName + " is inviting you to a call",
+								ImageURL: fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar")),
+							},
+							Android: &messaging.AndroidConfig{
+								Priority: "high",
+								TTL:      &ttl,
+							},
+							Tokens: tokens,
 						},
-						Notification: &messaging.Notification{
-							Title:    "Incoming Call",
-							Body:     participantName + " is inviting you to a call",
-							ImageURL: fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar")),
-						},
-						Android: &messaging.AndroidConfig{
-							Priority: "high",
-						},
-						Tokens: tokens,
-					}
-
-					_, err := messagingClient.SendEachForMulticast(c.Request().Context(), message)
-					if err != nil {
-						log.Println(err)
-					}
+						ScheduledTime: time.Now(),
+					})
 				}
 			}
 
@@ -251,6 +292,9 @@ func main() {
 				"message": true,
 			})
 		})
+
+		// launch the notification scheduler
+		go monitorNotifications()
 
 		return nil
 	})
