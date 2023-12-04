@@ -225,11 +225,12 @@ func main() {
 
 				err := apis.EnrichRecord(c, app.Dao(), roomRecord, "invited_participants")
 				if err == nil {
+					participants := roomRecord.GetStringSlice("participants")
 					invitedParticipants := roomRecord.ExpandedAll("invited_participants")
 
 					// get the tokens of the invited participants
 					for _, participant := range invitedParticipants {
-						if participant.Id == user.Id {
+						if participant.Id == user.Id || slices.Contains(participants, participant.Id) {
 							continue
 						}
 
