@@ -157,6 +157,19 @@ func main() {
 				return err
 			}
 
+			// get first room that user is already in
+			existingJoinedRoom, _ := app.Dao().FindFirstRecordByFilter(roomCollection.Id, "participants~{:user}", dbx.Params{"user": user.Id})
+
+			// throw an error that user has already joined (if they have)
+			//
+			// if they have already joined, chances are:
+			// - they are trying to join a call from a different chat
+			// - they are trying to join a call from the same chat
+			// - they are trying to join a call from the same chat, but they are already in a call from a different devcie
+			if existingJoinedRoom != nil {
+				return apis.NewForbiddenError("You have already joined a call", nil)
+			}
+
 			// get the room if it already exists
 			roomRecord, err := app.Dao().FindFirstRecordByFilter(roomCollection.Id, "chat={:chat}", dbx.Params{"chat": chat.Id})
 			if err != nil {
