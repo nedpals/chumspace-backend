@@ -221,29 +221,26 @@ func main() {
 			// notify other invited participants
 			if !isRoomExisting {
 				inviteeJson, _ := json.Marshal(user.PublicExport())
-				invitedParticipants := roomRecord.GetStringSlice("invited_participants")
 				tokens := []string{}
 
-				// get the tokens of the invited participants
-				for _, participantId := range invitedParticipants {
-					if participantId == user.Id {
-						continue
-					}
-					participant, err := app.Dao().FindRecordById("users", participantId)
-					if err != nil {
-						continue
-					}
-					participantTokens := []string{}
-					if err := participant.UnmarshalJSONField("tokens", &participantTokens); err != nil {
-						continue
-					}
+				err := apis.EnrichRecord(c, app.Dao(), roomRecord, "invited_participants")
+				if err == nil {
+					invitedParticipants := roomRecord.ExpandedAll("invited_participants")
 
-					tokens = append(tokens, participantTokens...)
+					// get the tokens of the invited participants
+					for _, participant := range invitedParticipants {
+						if participant.Id == user.Id {
+							continue
+						}
+
+						participantTokens := participant.GetStringSlice("fcm_tokens")
+						tokens = append(tokens, participantTokens...)
+					}
 				}
 
 				if len(tokens) != 0 {
 					// construct the message
-					ttl := time.Duration(10) * time.Second
+					ttl := time.Duration(5) * time.Minute
 					notifScheduler.AddNotification(&ScheduledNotification{
 						MulticastMessage: &messaging.MulticastMessage{
 							Data: map[string]string{
@@ -263,7 +260,7 @@ func main() {
 							},
 							Tokens: tokens,
 						},
-						ScheduledTime: time.Now(),
+						ScheduledTime: time.Now().Add(2 * time.Second),
 					})
 				}
 			}
