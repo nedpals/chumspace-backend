@@ -12,12 +12,14 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
 	"github.com/labstack/echo/v5"
+	lkAuth "github.com/livekit/protocol/auth"
+	"github.com/livekit/protocol/livekit"
+	lksdk "github.com/livekit/server-sdk-go"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/tools/security"
 	"golang.org/x/exp/slices"
 	"google.golang.org/api/option"
 )
@@ -77,22 +79,24 @@ func main() {
 		// set the messaging client of the notification scheduler
 		notifScheduler.MessagingClient = messagingClient
 
+		// get the livekit host
+		lkHost, lkHostExists := os.LookupEnv("LIVEKIT_SERVER_URL")
+		if !lkHostExists {
+			return fmt.Errorf("LIVEKIT_SERVER_URL is not set")
+		}
+
 		// get the livekit api key and secret first
 		lkApiKey, lkApiKeyExists := os.LookupEnv("LIVEKIT_API_KEY")
 		if !lkApiKeyExists {
-			return apis.NewApiError(
-				http.StatusInternalServerError,
-				"Unable to fulfill your request at this time due to an internal error.",
-				nil)
+			return fmt.Errorf("LIVEKIT_API_KEY is not set")
 		}
 
 		lkApiSecret, lkApiSecretExists := os.LookupEnv("LIVEKIT_API_SECRET")
 		if !lkApiSecretExists {
-			return apis.NewApiError(
-				http.StatusInternalServerError,
-				"Unable to fulfill your request at this time due to an internal error.",
-				nil)
+			return fmt.Errorf("LIVEKIT_API_SECRET is not set")
 		}
+
+		lkRoomClient := lksdk.NewRoomServiceClient(lkHost, lkApiKey, lkApiSecret)
 
 		e.Router.Add("POST", "/api/test_fcm", func(c echo.Context) error {
 			// get the token from query params
@@ -112,7 +116,6 @@ func main() {
 					Notification: &messaging.Notification{
 						Title: "Test FCM",
 						Body:  "This is a test notification",
-						// ImageURL: fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar")),
 					},
 					Android: &messaging.AndroidConfig{
 						TTL: &ttl,
@@ -199,21 +202,23 @@ func main() {
 			}
 
 			// list of grants and other info to be permitted to the user
-			claims := map[string]any{
-				"iss":      lkApiKey,
-				"sub":      identity,
-				"room":     roomRecord.Id,
-				"name":     participantName,
-				"metadata": user.Id,
-				"video": map[string]bool{
-					"roomJoin":     true,
-					"canPublish":   true,
-					"canSubscribe": true,
-				},
+			participantFlag := true
+			at := lkRoomClient.CreateToken()
+			grant := &lkAuth.VideoGrant{
+				Room:         roomRecord.Id,
+				RoomJoin:     true,
+				CanPublish:   &participantFlag,
+				CanSubscribe: &participantFlag,
 			}
 
+			at.AddGrant(grant).
+				SetIdentity(identity).
+				SetName(participantName).
+				SetMetadata(user.Id).
+				SetValidFor(6 * 60 * 60)
+
 			// create a JWT token
-			token, err := security.NewJWT(claims, lkApiSecret, 6*60*60)
+			token, err := at.ToJWT()
 			if err != nil {
 				return err
 			}
@@ -273,6 +278,61 @@ func main() {
 			return c.JSON(http.StatusOK, map[string]string{
 				"token": token,
 				"room":  roomRecord.Id,
+			})
+		}, apis.RequireRecordAuth())
+
+		// this route is for the invited participants to respond the call
+		e.Router.Add("POST", "/api/room_data", func(c echo.Context) error {
+			chatId := c.QueryParam("chat_id")
+			if len(chatId) == 0 {
+				return apis.NewBadRequestError("chat_id is required", nil)
+			}
+
+			user := apis.RequestInfo(c).AuthRecord
+			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "chat={:chat} && invited_participants~{:user}", dbx.Params{"chat": chatId, "user": user.Id})
+			if err != nil {
+				return apis.NewNotFoundError("room not found", nil)
+			}
+
+			rawPayloadData := map[string]any{}
+			if status := c.QueryParam("status"); len(status) != 0 {
+				switch status {
+				case "rejected", "accepted", "declined":
+					if status == "rejected" {
+						status = "declined"
+					}
+
+					if status == "declined" && len(room.GetStringSlice("participants")) == 1 {
+						rawPayloadData["disconnect"] = true
+						rawPayloadData["disconnect_reason"] = fmt.Sprintf("Call %s by %s", status, user.GetString("name"))
+					}
+
+					rawPayloadData["call_status"] = status
+					rawPayloadData["call_status_by"] = user.Id
+				}
+			}
+
+			if len(rawPayloadData) == 0 {
+				return apis.NewBadRequestError("no data to send", nil)
+			}
+
+			payloadData, err := json.Marshal(rawPayloadData)
+			if err != nil {
+				return err
+			}
+
+			_, err = lkRoomClient.SendData(c.Request().Context(), &livekit.SendDataRequest{
+				Room: room.Id,
+				Kind: livekit.DataPacket_RELIABLE,
+				Data: payloadData,
+			})
+
+			if err != nil {
+				return err
+			}
+
+			return c.JSON(http.StatusOK, map[string]string{
+				"message": "ok",
 			})
 		}, apis.RequireRecordAuth())
 
