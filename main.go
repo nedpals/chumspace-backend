@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -247,7 +248,13 @@ func main() {
 				if len(tokens) != 0 {
 					// construct the message
 					ttl := time.Duration(5) * time.Minute
-					imageUrl := fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar"))
+					imageUrl := "" // picture of user with no avatar
+					if avatar := user.GetString("avatar"); len(avatar) != 0 {
+						gotImageUrl, err := url.JoinPath(app.Settings().Meta.AppUrl, "api/files/users", user.Id, avatar)
+						if err == nil {
+							imageUrl = gotImageUrl
+						}
+					}
 
 					notifScheduler.AddNotification(&ScheduledNotification{
 						MulticastMessage: &messaging.MulticastMessage{
