@@ -242,6 +242,8 @@ func main() {
 				if len(tokens) != 0 {
 					// construct the message
 					ttl := time.Duration(5) * time.Minute
+					imageUrl := fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar"))
+
 					notifScheduler.AddNotification(&ScheduledNotification{
 						MulticastMessage: &messaging.MulticastMessage{
 							Data: map[string]string{
@@ -249,11 +251,12 @@ func main() {
 								"call_type": callType,
 								"invitee":   string(inviteeJson),
 								"chat_id":   chat.Id,
+								"image_url": imageUrl,
 							},
 							Notification: &messaging.Notification{
 								Title:    "Incoming Call",
 								Body:     participantName + " is inviting you to a call",
-								ImageURL: fmt.Sprintf("%s/api/files/users/%s/%s", app.Settings().Meta.AppUrl, user.Id, user.GetString("avatar")),
+								ImageURL: imageUrl,
 							},
 							Android: &messaging.AndroidConfig{
 								Priority: "high",
