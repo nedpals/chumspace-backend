@@ -62,6 +62,10 @@ func initializeFirebase() *firebase.App {
 	return app
 }
 
+func makeChatIdentifier(fromChatType string, chatId string) string {
+	return fromChatType + ":" + chatId
+}
+
 func main() {
 	app := pocketbase.New()
 
@@ -132,6 +136,12 @@ func main() {
 		}, apis.RequireRecordAuth())
 
 		e.Router.Add("POST", "/api/join_call", func(c echo.Context) error {
+			// get the room type
+			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if fromChatType != "ds" && fromChatType != "parent" {
+				return apis.NewBadRequestError("invalid room type", nil)
+			}
+
 			// get the call type
 			callType := c.QueryParamDefault("type", "audio")
 
@@ -141,7 +151,7 @@ func main() {
 				return apis.NewBadRequestError("chat_id is required", nil)
 			}
 
-			chat, err := app.Dao().FindRecordById("chat_list_parent", chatId)
+			chat, err := app.Dao().FindRecordById("chat_list_"+fromChatType, chatId)
 			if err != nil {
 				return err
 			}
@@ -175,11 +185,13 @@ func main() {
 			}
 
 			// get the room if it already exists
-			roomRecord, err := app.Dao().FindFirstRecordByFilter(roomCollection.Id, "chat={:chat}", dbx.Params{"chat": chat.Id})
+			roomRecord, err := app.Dao().FindFirstRecordByFilter(roomCollection.Id, "from_chat={:from_chat}", dbx.Params{
+				"from_chat": makeChatIdentifier(fromChatType, chat.Id),
+			})
 			if err != nil {
 				// create the room if it doesn't exist
 				roomRecord = models.NewRecord(roomCollection)
-				roomRecord.Set("chat", chat.Id)
+				roomRecord.Set("from_chat", makeChatIdentifier(fromChatType, chat.Id))
 				roomRecord.Set("hosts", []string{user.Id})
 				roomRecord.Set("participants", []string{})
 				roomRecord.Set("invited_participants", []string{
@@ -203,13 +215,16 @@ func main() {
 			}
 
 			// list of grants and other info to be permitted to the user
-			participantFlag := true
+			isHost := slices.Contains(roomRecord.GetStringSlice("hosts"), user.Id)
+			isParticipant := true
+
 			at := lkRoomClient.CreateToken()
 			grant := &lkAuth.VideoGrant{
 				Room:         roomRecord.Id,
 				RoomJoin:     true,
-				CanPublish:   &participantFlag,
-				CanSubscribe: &participantFlag,
+				CanPublish:   &isParticipant,
+				CanSubscribe: &isParticipant,
+				RoomAdmin:    isHost,
 			}
 
 			at.AddGrant(grant).
@@ -259,11 +274,12 @@ func main() {
 					notifScheduler.AddNotification(&ScheduledNotification{
 						MulticastMessage: &messaging.MulticastMessage{
 							Data: map[string]string{
-								"type":      "incoming_call",
-								"call_type": callType,
-								"invitee":   string(inviteeJson),
-								"chat_id":   chat.Id,
-								"image_url": imageUrl,
+								"type":           "incoming_call",
+								"call_type":      callType,
+								"invitee":        string(inviteeJson),
+								"chat_id":        chat.Id,
+								"from_chat_type": fromChatType,
+								"image_url":      imageUrl,
 							},
 							Notification: &messaging.Notification{
 								Title:    "Incoming Call",
@@ -290,13 +306,22 @@ func main() {
 
 		// this route is for the invited participants to respond the call
 		e.Router.Add("POST", "/api/room_data", func(c echo.Context) error {
+			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if fromChatType != "ds" && fromChatType != "parent" {
+				return apis.NewBadRequestError("invalid room type", nil)
+			}
+
 			chatId := c.QueryParam("chat_id")
 			if len(chatId) == 0 {
 				return apis.NewBadRequestError("chat_id is required", nil)
 			}
 
 			user := apis.RequestInfo(c).AuthRecord
-			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "chat={:chat} && invited_participants~{:user}", dbx.Params{"chat": chatId, "user": user.Id})
+			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "from_chat={:from_chat} && invited_participants~{:user}",
+				dbx.Params{
+					"from_chat": makeChatIdentifier(fromChatType, chatId),
+					"user":      user.Id,
+				})
 			if err != nil {
 				return apis.NewNotFoundError("room not found", nil)
 			}
@@ -346,13 +371,21 @@ func main() {
 		e.Router.Add("POST", "/api/leave_call", func(c echo.Context) error {
 			// get the chat info
 			fromError := c.QueryParam("from_error") == "1"
+			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if fromChatType != "ds" && fromChatType != "parent" {
+				return apis.NewBadRequestError("from_chat_type is required", nil)
+			}
+
 			chatId := c.QueryParam("chat_id")
 			if len(chatId) == 0 {
 				return apis.NewBadRequestError("chat_id is required", nil)
 			}
 
 			user := apis.RequestInfo(c).AuthRecord
-			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "chat={:chat} && participants~{:user}", dbx.Params{"chat": chatId, "user": user.Id})
+			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "from_chat={:from_chat} && participants~{:user}", dbx.Params{
+				"from_chat": makeChatIdentifier(fromChatType, chatId),
+				"user":      user.Id,
+			})
 			if err == nil {
 				participants := room.GetStringSlice("participants")
 				// if the user is the last participant, remove the room
