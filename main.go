@@ -16,6 +16,7 @@ import (
 	lkAuth "github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go"
+	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -112,25 +113,35 @@ func main() {
 				return apis.NewBadRequestError("token is required", nil)
 			}
 
+			// reverse for prod to avoid abuse
+			isDev := c.QueryParam("key") == "jeff2"
+
 			// construct the message
 			ttl := time.Duration(10) * time.Second
+			notifId, _ := gonanoid.New()
+			var notif *messaging.Notification
 
-			notifScheduler.AddNotification(&ScheduledNotification{
-				Message: &messaging.Message{
-					Data: map[string]string{
-						"type": "test_fcm",
-					},
-					Notification: &messaging.Notification{
-						Title: "Test FCM",
-						Body:  "This is a test notification",
-					},
-					Android: &messaging.AndroidConfig{
-						TTL: &ttl,
-					},
-					Token: token,
+			if isDev {
+				notif = &messaging.Notification{
+					Title: "Test FCM",
+					Body:  "This is a test notification",
+				}
+			}
+
+			err := sendNotification(notifId, &messaging.Message{
+				Data: map[string]string{
+					"type": "test_fcm",
 				},
-				ScheduledTime: time.Now().Add(5 * time.Second),
-			})
+				Notification: notif,
+				Android: &messaging.AndroidConfig{
+					TTL: &ttl,
+				},
+				Token: token,
+			}, nil, notifScheduler.MessagingClient)
+
+			if err != nil {
+				return apis.NewBadRequestError(err.Error(), nil)
+			}
 
 			return c.JSON(http.StatusOK, map[string]string{
 				"message": "success",

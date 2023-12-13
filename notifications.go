@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -73,6 +75,21 @@ func (n *NotificationScheduler) RemoveNotification(target string) {
 	delete(n.Notifs, target)
 }
 
+func sendNotification(notifId string, message *messaging.Message, multicastMsg *messaging.MulticastMessage, client *messaging.Client) error {
+	if message != nil {
+		_, err := client.Send(context.Background(), message)
+		if err != nil {
+			return fmt.Errorf("error sending notification to %s: %v", notifId, err)
+		}
+	} else if multicastMsg != nil {
+		_, err := client.SendEachForMulticast(context.Background(), multicastMsg)
+		if err != nil {
+			return fmt.Errorf("error sending notification to %s: %v", notifId, err)
+		}
+	}
+	return errors.New("no message specified")
+}
+
 func startSchedulingNotifications() (*NotificationScheduler, func()) {
 	notifier := make(chan *ScheduledNotification)
 	scheduler := NewNotificationScheduler(notifier)
@@ -81,18 +98,9 @@ func startSchedulingNotifications() (*NotificationScheduler, func()) {
 			log.Default().Printf("Sending notification to %s\n", notif.Id)
 
 			// send the notification
-			if notif.Message != nil {
-				_, err := scheduler.MessagingClient.Send(context.Background(), notif.Message)
-				if err != nil {
-					log.Default().Printf("Error sending notification to %s: %v\n", notif.Id, err)
-				}
-			} else if notif.MulticastMessage != nil {
-				_, err := scheduler.MessagingClient.SendEachForMulticast(context.Background(), notif.MulticastMessage)
-				if err != nil {
-					log.Default().Printf("Error sending notification to %s: %v\n", notif.Id, err)
-				}
-			} else {
-				log.Default().Printf("Error sending notification to %s: no message specified\n", notif.Id)
+			err := sendNotification(notif.Id, notif.Message, notif.MulticastMessage, scheduler.MessagingClient)
+			if err != nil {
+				log.Default().Println(err.Error())
 			}
 
 			scheduler.RemoveNotification(notif.Id)
