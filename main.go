@@ -71,6 +71,8 @@ func main() {
 
 	// serves static files from the provided public dir (if exists)
 	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+		e.Router.Use(apis.ActivityLogger(e.App))
+
 		// notification scheduler
 		notifScheduler, monitorNotifications := startSchedulingNotifications()
 
