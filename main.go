@@ -293,20 +293,41 @@ func main() {
 						}
 					}
 
+					// separate notification data to be put into data payload
+					// as a JSON string to be parsed by the app
+					//
+					// this is to avoid FCM from automatically showing the notification
+					notifJson, _ := json.Marshal(map[string]any{
+						"type":       "incoming_call",
+						"title":      "Incoming Call",
+						"body":       participantName + " is inviting you to a call",
+						"image_url":  imageUrl,
+						"importance": "max",
+						"priority":   "high",
+						"actions": []map[string]any{
+							{
+								"type":                 "accept_call_action",
+								"text":                 "Accept",
+								"shows_user_interface": true,
+							},
+							{
+								"type":                 "decline_call_action",
+								"text":                 "Decline",
+								"shows_user_interface": false,
+							},
+						},
+					})
+
 					notifScheduler.AddNotification(&ScheduledNotification{
 						MulticastMessage: &messaging.MulticastMessage{
 							Data: map[string]string{
 								"type":           "incoming_call",
+								"notification":   string(notifJson),
 								"call_type":      callType,
 								"invitee":        string(inviteeJson),
 								"chat_id":        chat.Id,
 								"from_chat_type": fromChatType,
 								"image_url":      imageUrl,
-							},
-							Notification: &messaging.Notification{
-								Title:    "Incoming Call",
-								Body:     participantName + " is inviting you to a call",
-								ImageURL: imageUrl,
 							},
 							Android: &messaging.AndroidConfig{
 								Priority: "high",
