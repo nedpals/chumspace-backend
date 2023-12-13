@@ -16,7 +16,6 @@ import (
 	lkAuth "github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go"
-	gonanoid "github.com/matoous/go-nanoid/v2"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
@@ -118,26 +117,31 @@ func main() {
 
 			// construct the message
 			ttl := time.Duration(10) * time.Second
-			notifId, _ := gonanoid.New()
-			var notif *messaging.Notification
-
-			if isDev {
-				notif = &messaging.Notification{
-					Title: "Test FCM",
-					Body:  "This is a test notification",
-				}
-			}
-
-			err := sendNotification(notifId, &messaging.Message{
+			message := &messaging.Message{
 				Data: map[string]string{
 					"type": "test_fcm",
 				},
-				Notification: notif,
+				Notification: &messaging.Notification{
+					Title: "Test FCM",
+					Body:  "This is a test notification",
+				},
 				Android: &messaging.AndroidConfig{
 					TTL: &ttl,
 				},
 				Token: token,
-			}, nil, notifScheduler.MessagingClient)
+			}
+
+			if isDev {
+				_, err := notifScheduler.MessagingClient.Send(context.Background(), message)
+				if err != nil {
+					return fmt.Errorf("error sending notification: %v", err)
+				}
+			} else {
+				_, err := notifScheduler.MessagingClient.SendDryRun(context.Background(), message)
+				if err != nil {
+					return fmt.Errorf("error sending notification: %v", err)
+				}
+			}
 
 			if err != nil {
 				return apis.NewBadRequestError(err.Error(), nil)
