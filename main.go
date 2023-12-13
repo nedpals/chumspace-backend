@@ -298,6 +298,7 @@ func main() {
 					//
 					// this is to avoid FCM from automatically showing the notification
 					notifJson, _ := json.Marshal(map[string]any{
+						"id":         1, // 1 for incoming call
 						"type":       "incoming_call",
 						"title":      "Incoming Call",
 						"body":       participantName + " is inviting you to a call",
