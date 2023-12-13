@@ -140,6 +140,11 @@ func main() {
 		e.Router.Add("POST", "/api/join_call", func(c echo.Context) error {
 			// get the room type
 			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if len(fromChatType) == 0 {
+				// from_room_type for legacy
+				fromChatType = c.QueryParam("from_room_type")
+			}
+
 			if fromChatType != "ds" && fromChatType != "parent" {
 				return apis.NewBadRequestError("invalid room type", nil)
 			}
@@ -309,6 +314,11 @@ func main() {
 		// this route is for the invited participants to respond the call
 		e.Router.Add("POST", "/api/room_data", func(c echo.Context) error {
 			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if len(fromChatType) == 0 {
+				// from_room_type for legacy
+				fromChatType = c.QueryParam("from_room_type")
+			}
+
 			if fromChatType != "ds" && fromChatType != "parent" {
 				return apis.NewBadRequestError("invalid room type", nil)
 			}
@@ -374,6 +384,11 @@ func main() {
 			// get the chat info
 			fromError := c.QueryParam("from_error") == "1"
 			fromChatType := c.QueryParam("from_chat_type") // ds or parent
+			if len(fromChatType) == 0 {
+				// from_room_type for legacy
+				fromChatType = c.QueryParam("from_room_type")
+			}
+
 			if fromChatType != "ds" && fromChatType != "parent" {
 				return apis.NewBadRequestError("from_chat_type is required", nil)
 			}
