@@ -317,6 +317,9 @@ func main() {
 								"shows_user_interface": false,
 							},
 						},
+						"details": map[string]any{
+							"full_screen_intent": true,
+						},
 					})
 
 					notifScheduler.AddNotification(&ScheduledNotification{
