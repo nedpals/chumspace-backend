@@ -158,6 +158,8 @@ func main() {
 			if len(fromChatType) == 0 {
 				// from_room_type for legacy
 				fromChatType = c.QueryParam("from_room_type")
+			} else if fromChatType == "chum" {
+				fromChatType = "ds"
 			}
 
 			if fromChatType != "ds" && fromChatType != "parent" {
@@ -357,6 +359,8 @@ func main() {
 			if len(fromChatType) == 0 {
 				// from_room_type for legacy
 				fromChatType = c.QueryParam("from_room_type")
+			} else if fromChatType == "chum" {
+				fromChatType = "ds"
 			}
 
 			if fromChatType != "ds" && fromChatType != "parent" {
