@@ -66,6 +66,34 @@ func makeChatIdentifier(fromChatType string, chatId string) string {
 	return fromChatType + ":" + chatId
 }
 
+func decodeCallDetailsParams(c echo.Context) (fromChatType string, chatId string, err error) {
+	fromChatType = c.QueryParam("from_chat_type") // ds or parent
+	if len(fromChatType) == 0 {
+		// from_room_type for legacy
+		fromChatType = c.QueryParam("from_room_type")
+	}
+
+	if fromChatType == "chum" {
+		fromChatType = "ds"
+	}
+
+	if fromChatType != "ds" && fromChatType != "parent" {
+		err = apis.NewBadRequestError("invalid room type", nil)
+		if len(fromChatType) == 0 {
+			err = apis.NewBadRequestError("from_chat_type is required", nil)
+		}
+		return
+	}
+
+	chatId = c.QueryParam("chat_id")
+	if len(chatId) == 0 {
+		err = apis.NewBadRequestError("chat_id is required", nil)
+		return
+	}
+
+	return
+}
+
 func main() {
 	app := pocketbase.New()
 
@@ -153,28 +181,16 @@ func main() {
 		}, apis.RequireRecordAuth())
 
 		e.Router.Add("POST", "/api/join_call", func(c echo.Context) error {
-			// get the room type
-			fromChatType := c.QueryParam("from_chat_type") // ds or parent
-			if len(fromChatType) == 0 {
-				// from_room_type for legacy
-				fromChatType = c.QueryParam("from_room_type")
-			} else if fromChatType == "chum" {
-				fromChatType = "ds"
-			}
-
-			if fromChatType != "ds" && fromChatType != "parent" {
-				return apis.NewBadRequestError("invalid room type", nil)
+			// get the room type and chat id
+			fromChatType, chatId, err := decodeCallDetailsParams(c)
+			if err != nil {
+				return err
 			}
 
 			// get the call type
 			callType := c.QueryParamDefault("type", "audio")
 
 			// get the chat info
-			chatId := c.QueryParam("chat_id")
-			if len(chatId) == 0 {
-				return apis.NewBadRequestError("chat_id is required", nil)
-			}
-
 			chat, err := app.Dao().FindRecordById("chat_list_"+fromChatType, chatId)
 			if err != nil {
 				return err
@@ -355,21 +371,9 @@ func main() {
 
 		// this route is for the invited participants to respond the call
 		e.Router.Add("POST", "/api/room_data", func(c echo.Context) error {
-			fromChatType := c.QueryParam("from_chat_type") // ds or parent
-			if len(fromChatType) == 0 {
-				// from_room_type for legacy
-				fromChatType = c.QueryParam("from_room_type")
-			} else if fromChatType == "chum" {
-				fromChatType = "ds"
-			}
-
-			if fromChatType != "ds" && fromChatType != "parent" {
-				return apis.NewBadRequestError("invalid room type", nil)
-			}
-
-			chatId := c.QueryParam("chat_id")
-			if len(chatId) == 0 {
-				return apis.NewBadRequestError("chat_id is required", nil)
+			fromChatType, chatId, err := decodeCallDetailsParams(c)
+			if err != nil {
+				return err
 			}
 
 			user := apis.RequestInfo(c).AuthRecord
@@ -426,22 +430,12 @@ func main() {
 
 		e.Router.Add("POST", "/api/leave_call", func(c echo.Context) error {
 			// get the chat info
+			fromChatType, chatId, err := decodeCallDetailsParams(c)
+			if err != nil {
+				return err
+			}
+
 			fromError := c.QueryParam("from_error") == "1"
-			fromChatType := c.QueryParam("from_chat_type") // ds or parent
-			if len(fromChatType) == 0 {
-				// from_room_type for legacy
-				fromChatType = c.QueryParam("from_room_type")
-			}
-
-			if fromChatType != "ds" && fromChatType != "parent" {
-				return apis.NewBadRequestError("from_chat_type is required", nil)
-			}
-
-			chatId := c.QueryParam("chat_id")
-			if len(chatId) == 0 {
-				return apis.NewBadRequestError("chat_id is required", nil)
-			}
-
 			user := apis.RequestInfo(c).AuthRecord
 			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "from_chat={:from_chat} && participants~{:user}", dbx.Params{
 				"from_chat": makeChatIdentifier(fromChatType, chatId),
