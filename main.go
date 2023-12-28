@@ -66,6 +66,8 @@ func makeChatIdentifier(fromChatType string, chatId string) string {
 	return fromChatType + ":" + chatId
 }
 
+var validFromChatTypes = []string{"ds", "parent", "community"}
+
 func decodeCallDetailsParams(c echo.Context) (fromChatType string, chatId string, err error) {
 	fromChatType = c.QueryParam("from_chat_type") // ds or parent
 	if len(fromChatType) == 0 {
@@ -77,7 +79,7 @@ func decodeCallDetailsParams(c echo.Context) (fromChatType string, chatId string
 		fromChatType = "ds"
 	}
 
-	if fromChatType != "ds" && fromChatType != "parent" {
+	if !slices.Contains(validFromChatTypes, fromChatType) {
 		err = apis.NewBadRequestError("invalid room type", nil)
 		if len(fromChatType) == 0 {
 			err = apis.NewBadRequestError("from_chat_type is required", nil)
@@ -191,12 +193,21 @@ func main() {
 			callType := c.QueryParamDefault("type", "audio")
 
 			// get the chat info
-			chat, err := app.Dao().FindRecordById("chat_list_"+fromChatType, chatId)
+			chatListCollectionName := "chat_list_" + fromChatType
+			if fromChatType == "community" {
+				chatListCollectionName = "chat_list_gc"
+			}
+
+			chat, err := app.Dao().FindRecordById(chatListCollectionName, chatId)
 			if err != nil {
 				return err
 			}
 
-			apis.EnrichRecord(c, app.Dao(), chat, "chatRequestTo", "chatRequestBy")
+			if fromChatType == "community" {
+				apis.EnrichRecord(c, app.Dao(), chat, "community", "parents")
+			} else {
+				apis.EnrichRecord(c, app.Dao(), chat, "chatRequestTo", "chatRequestBy")
+			}
 
 			// get the user
 			user := apis.RequestInfo(c).AuthRecord
@@ -234,10 +245,20 @@ func main() {
 				roomRecord.Set("from_chat", makeChatIdentifier(fromChatType, chat.Id))
 				roomRecord.Set("hosts", []string{user.Id})
 				roomRecord.Set("participants", []string{})
-				roomRecord.Set("invited_participants", []string{
-					chat.ExpandedOne("chatRequestTo").GetString("users"),
-					chat.ExpandedOne("chatRequestBy").GetString("users"),
-				})
+
+				if fromChatType == "community" {
+					parentUsersId := make([]string, len(chat.GetStringSlice("parents")))
+					for idx, parent := range chat.ExpandedAll("parents") {
+						parentUsersId[idx] = parent.GetString("users")
+					}
+
+					roomRecord.Set("invited_participants", parentUsersId)
+				} else {
+					roomRecord.Set("invited_participants", []string{
+						chat.ExpandedOne("chatRequestTo").GetString("users"),
+						chat.ExpandedOne("chatRequestBy").GetString("users"),
+					})
+				}
 			}
 
 			isRoomExisting := len(roomRecord.Id) != 0 && !roomRecord.IsNew()
