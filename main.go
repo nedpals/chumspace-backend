@@ -204,7 +204,7 @@ func main() {
 			}
 
 			if fromChatType == "community" {
-				apis.EnrichRecord(c, app.Dao(), chat, "community", "parents")
+				apis.EnrichRecord(c, app.Dao(), chat, "parents")
 			} else {
 				apis.EnrichRecord(c, app.Dao(), chat, "chatRequestTo", "chatRequestBy")
 			}
@@ -247,8 +247,9 @@ func main() {
 				roomRecord.Set("participants", []string{})
 
 				if fromChatType == "community" {
-					parentUsersId := make([]string, len(chat.GetStringSlice("parents")))
-					for idx, parent := range chat.ExpandedAll("parents") {
+					expandedParents := chat.ExpandedAll("parents")
+					parentUsersId := make([]string, len(expandedParents))
+					for idx, parent := range expandedParents {
 						parentUsersId[idx] = parent.GetString("users")
 					}
 
@@ -263,11 +264,12 @@ func main() {
 
 			isRoomExisting := len(roomRecord.Id) != 0 && !roomRecord.IsNew()
 
-			// add the user to the room
+			// do not allow the user to join if they are not invited
 			if !slices.Contains(roomRecord.GetStringSlice("invited_participants"), user.Id) {
 				return apis.NewForbiddenError("forbidden to join this room", nil)
 			}
 
+			// add the user to the room if they are not already in it
 			participants := roomRecord.GetStringSlice("participants")
 			if !slices.Contains(participants, user.Id) {
 				participants = append(participants, user.Id)
@@ -305,8 +307,7 @@ func main() {
 				inviteeJson, _ := json.Marshal(user.PublicExport())
 				tokens := []string{}
 
-				err := apis.EnrichRecord(c, app.Dao(), roomRecord, "invited_participants")
-				if err == nil {
+				if err := apis.EnrichRecord(c, app.Dao(), roomRecord, "invited_participants"); err == nil {
 					participants := roomRecord.GetStringSlice("participants")
 					invitedParticipants := roomRecord.ExpandedAll("invited_participants")
 
@@ -316,6 +317,7 @@ func main() {
 							continue
 						}
 
+						fmt.Printf("[call_room:%s] Notifying %s (%s)\n", roomRecord.Id, participant.GetString("name"), participant.Id)
 						participantTokens := participant.GetStringSlice("fcm_tokens")
 						tokens = append(tokens, participantTokens...)
 					}
