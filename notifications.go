@@ -78,15 +78,15 @@ func startSchedulingNotifications() (*NotificationScheduler, func()) {
 	scheduler := NewNotificationScheduler(notifier)
 	monitorFunc := func() {
 		for notif := range notifier {
-			log.Default().Printf("Sending notification to %s\n", notif.Id)
-
 			// send the notification
 			if notif.Message != nil {
+				log.Default().Printf("Sending notification to %s\n", notif.Message.Token)
 				_, err := scheduler.MessagingClient.Send(context.Background(), notif.Message)
 				if err != nil {
 					log.Default().Printf("Error sending notification to %s: %v\n", notif.Id, err)
 				}
 			} else if notif.MulticastMessage != nil {
+				log.Default().Printf("Sending notification to %q\n", notif.MulticastMessage.Tokens)
 				_, err := scheduler.MessagingClient.SendEachForMulticast(context.Background(), notif.MulticastMessage)
 				if err != nil {
 					log.Default().Printf("Error sending notification to %s: %v\n", notif.Id, err)
