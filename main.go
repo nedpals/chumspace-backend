@@ -66,6 +66,17 @@ func makeChatIdentifier(fromChatType string, chatId string) string {
 	return fromChatType + ":" + chatId
 }
 
+func makeChatIdentifierRecord(r *models.Record) string {
+	fromChatType := "ds"
+	if r.Collection().Name == "chat_list_parent" {
+		fromChatType = "parent"
+	} else if r.Collection().Name == "chat_list_gc" {
+		fromChatType = "community"
+	}
+
+	return makeChatIdentifier(fromChatType, r.Id)
+}
+
 var validFromChatTypes = []string{"ds", "parent", "community"}
 
 func decodeCallDetailsParams(c echo.Context) (fromChatType string, chatId string, err error) {
@@ -487,6 +498,55 @@ func main() {
 
 		// launch the notification scheduler
 		go monitorNotifications()
+
+		return nil
+	})
+
+	app.OnRecordAfterUpdateRequest().Add(func(e *core.RecordUpdateEvent) error {
+		if e.Collection.Name != "chat_list_ds" && e.Collection.Name != "chat_list_parent" && e.Collection.Name != "chat_list_gc" {
+			return nil
+		}
+
+		// check if chat list is present in call rooms
+		idToLook := makeChatIdentifierRecord(e.Record)
+		room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "from_chat={:from_chat}", dbx.Params{"from_chat": idToLook})
+		if err != nil {
+			return nil
+		}
+
+		// if chat list is present, update the invited participants
+		invitedParticipants := room.GetStringSlice("invited_participants")
+
+		if e.Collection.Name == "chat_list_parent" {
+			if err := apis.EnrichRecord(e.HttpContext, app.Dao(), e.Record, "parents"); err != nil {
+				log.Println(err)
+				return nil
+			}
+
+			expandedParents := e.Record.ExpandedAll("parents")
+			parentUsersId := make([]string, len(expandedParents))
+			for idx, parent := range expandedParents {
+				parentUsersId[idx] = parent.GetString("users")
+			}
+
+			invitedParticipants = parentUsersId
+		} else {
+			if err := apis.EnrichRecord(e.HttpContext, app.Dao(), e.Record, "chatRequestTo", "chatRequestBy"); err != nil {
+				log.Println(err)
+				return nil
+			}
+
+			invitedParticipants = []string{
+				e.Record.ExpandedOne("chatRequestTo").GetString("users"),
+				e.Record.ExpandedOne("chatRequestBy").GetString("users"),
+			}
+		}
+
+		room.Set("invited_participants", invitedParticipants)
+		if err := app.Dao().SaveRecord(room); err != nil {
+			// do not return error or it will cause the update to fail
+			log.Println(err)
+		}
 
 		return nil
 	})
