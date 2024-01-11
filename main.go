@@ -251,14 +251,17 @@ func main() {
 				"from_chat": makeChatIdentifier(fromChatType, chat.Id),
 			})
 			if err != nil {
+				hosts := []string{user.Id}
+
 				// create the room if it doesn't exist
 				roomRecord = models.NewRecord(roomCollection)
-				roomRecord.Set("from_chat", makeChatIdentifier(fromChatType, chat.Id))
-				roomRecord.Set("hosts", []string{user.Id})
-				roomRecord.Set("participants", []string{})
 
 				if fromChatType == "community" {
 					expandedCommunity := chat.ExpandedOne("community")
+
+					// include community account in hosts
+					hosts = append(hosts, expandedCommunity.GetString("users"))
+
 					expandedParents := chat.ExpandedAll("parents")
 					invitedParticipants := make([]string, 1+len(expandedParents)) // community user + parents
 
@@ -274,6 +277,10 @@ func main() {
 						chat.ExpandedOne("chatRequestBy").GetString("users"),
 					})
 				}
+
+				roomRecord.Set("from_chat", makeChatIdentifier(fromChatType, chat.Id))
+				roomRecord.Set("hosts", hosts)
+				roomRecord.Set("participants", []string{})
 			}
 
 			isRoomExisting := len(roomRecord.Id) != 0 && !roomRecord.IsNew()
