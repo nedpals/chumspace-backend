@@ -215,7 +215,7 @@ func main() {
 			}
 
 			if fromChatType == "community" {
-				apis.EnrichRecord(c, app.Dao(), chat, "parents")
+				apis.EnrichRecord(c, app.Dao(), chat, "community", "parents")
 			} else {
 				apis.EnrichRecord(c, app.Dao(), chat, "chatRequestTo", "chatRequestBy")
 			}
@@ -258,13 +258,16 @@ func main() {
 				roomRecord.Set("participants", []string{})
 
 				if fromChatType == "community" {
+					expandedCommunity := chat.ExpandedOne("community")
 					expandedParents := chat.ExpandedAll("parents")
-					parentUsersId := make([]string, len(expandedParents))
+					invitedParticipants := make([]string, 1+len(expandedParents)) // community user + parents
+
+					invitedParticipants[0] = expandedCommunity.GetString("users")
 					for idx, parent := range expandedParents {
-						parentUsersId[idx] = parent.GetString("users")
+						invitedParticipants[idx+1] = parent.GetString("users")
 					}
 
-					roomRecord.Set("invited_participants", parentUsersId)
+					roomRecord.Set("invited_participants", invitedParticipants)
 				} else {
 					roomRecord.Set("invited_participants", []string{
 						chat.ExpandedOne("chatRequestTo").GetString("users"),
