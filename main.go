@@ -432,7 +432,7 @@ func main() {
 				return apis.NewNotFoundError("room not found", nil)
 			}
 
-			participantsInfo := []*models.Record{}
+			participantsInfo := []map[string]any{}
 			if err := apis.EnrichRecord(c, app.Dao(), room, "invited_participants"); err == nil {
 				invitedParticipants := room.ExpandedAll("invited_participants")
 				participantsByType := map[string][]*models.Record{}
@@ -465,17 +465,20 @@ func main() {
 					}
 
 					for _, participant := range found {
-						newRecord := models.NewRecord(participant.Collection())
+						newRecord := map[string]any{
+							"id":             participant.Id,
+							"collectionId":   participant.Collection().Id,
+							"collectionName": participant.Collection().Name,
+							"updated":        "",
+							"created":        "",
+							"avatar":         participant.GetString("avatar"),
+						}
 
 						switch pType {
 						case "parent":
-							newRecord.Id = participant.Id
-							newRecord.Set("name", fmt.Sprintf("%s %s %s", participant.GetString("first_name"), participant.GetString("middle_name"), participant.GetString("last_name")))
-							newRecord.Set("avatar", participant.GetString("avatar"))
+							newRecord["name"] = fmt.Sprintf("%s %s %s", participant.GetString("first_name"), participant.GetString("middle_name"), participant.GetString("last_name"))
 						case "community":
-							newRecord.Id = participant.Id
-							newRecord.Set("name", participant.GetString("name"))
-							newRecord.Set("avatar", participant.GetString("avatar"))
+							newRecord["name"] = participant.GetString("name")
 						}
 
 						participantsInfo = append(participantsInfo, newRecord)
