@@ -446,9 +446,9 @@ func main() {
 					collectionName := ""
 					switch pType {
 					case "parent":
-						collectionName = "chat_list_parent"
+						collectionName = "users_parent"
 					case "community":
-						collectionName = "chat_list_gc"
+						collectionName = "users_community"
 					default:
 						continue
 					}
