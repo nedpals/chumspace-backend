@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	firebase "firebase.google.com/go/v4"
@@ -411,6 +412,78 @@ func main() {
 				"token": token,
 				"room":  roomRecord.Id,
 			})
+		}, apis.RequireRecordAuth())
+
+		e.Router.Add("GET", "/api/room_participants", func(c echo.Context) error {
+			// get the room type and chat id
+			fromChatType, chatId, err := decodeCallDetailsParams(c)
+			if err != nil {
+				return err
+			}
+
+			// get the chat info
+			user := apis.RequestInfo(c).AuthRecord
+			room, err := app.Dao().FindFirstRecordByFilter("call_rooms", "from_chat={:from_chat} && invited_participants~{:user}",
+				dbx.Params{
+					"from_chat": makeChatIdentifier(fromChatType, chatId),
+					"user":      user.Id,
+				})
+			if err != nil {
+				return apis.NewNotFoundError("room not found", nil)
+			}
+
+			participantsInfo := []*models.Record{}
+			if err := apis.EnrichRecord(c, app.Dao(), room, "invited_participants"); err == nil {
+				invitedParticipants := room.ExpandedAll("invited_participants")
+				participantsByType := map[string][]*models.Record{}
+
+				for _, participant := range invitedParticipants {
+					userType := participant.GetString("label")
+					participantsByType[userType] = append(participantsByType[userType], participant)
+				}
+
+				for pType, participants := range participantsByType {
+					collectionName := ""
+					switch pType {
+					case "parent":
+						collectionName = "chat_list_parent"
+					case "community":
+						collectionName = "chat_list_gc"
+					default:
+						continue
+					}
+
+					// fetch the participants
+					ids := make([]string, len(participants))
+					for idx, participant := range participants {
+						ids[idx] = fmt.Sprintf("users = '%s'", participant.Id)
+					}
+
+					found, err := app.Dao().FindRecordsByFilter(collectionName, strings.Join(ids, " || "), "", 0, 0)
+					if err != nil {
+						return err
+					}
+
+					for _, participant := range found {
+						newRecord := models.NewRecord(participant.Collection())
+
+						switch pType {
+						case "parent":
+							newRecord.Id = participant.Id
+							newRecord.Set("name", fmt.Sprintf("%s %s %s", participant.GetString("first_name"), participant.GetString("middle_name"), participant.GetString("last_name")))
+							newRecord.Set("avatar", participant.GetString("avatar"))
+						case "community":
+							newRecord.Id = participant.Id
+							newRecord.Set("name", participant.GetString("name"))
+							newRecord.Set("avatar", participant.GetString("avatar"))
+						}
+
+						participantsInfo = append(participantsInfo, newRecord)
+					}
+				}
+			}
+
+			return c.JSON(http.StatusOK, participantsInfo)
 		}, apis.RequireRecordAuth())
 
 		// this route is for the invited participants to respond the call
